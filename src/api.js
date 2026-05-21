@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'https://maclinicbackend.onrender.com',
+  baseURL: 'https://maclinicbackend.onrender.com/api',
 });
 
 api.interceptors.request.use(
