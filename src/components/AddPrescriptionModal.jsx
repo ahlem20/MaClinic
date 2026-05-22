@@ -53,7 +53,7 @@ export default function AddPrescriptionModal({ isOpen, onClose, onSuccess }) {
       // Ouvrir la page d'impression dans un nouvel onglet
       window.open(`/prescriptions/print/${data._id}`, '_blank');
       
-      onSuccess();
+      if (onSuccess) onSuccess();
       onClose();
       // reset
       setPatientId('');
