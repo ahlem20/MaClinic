@@ -1,98 +1,226 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Coins, TrendingUp, Calendar, CreditCard, Activity, Sparkles, Receipt } from 'lucide-react';
+import { Coins, TrendingUp, Calendar, CreditCard, Activity, Sparkles, Receipt, Plus, Trash2, Wallet, TrendingDown } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
 import api from '../api';
 
 export default function Finance() {
   const [prescriptions, setPrescriptions] = useState([]);
+  const [charges, setCharges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalRevenue: 0,
-    thisMonth: 0,
-    today: 0
+    totalExpenses: 0,
+    netProfit: 0,
+    thisMonthRevenue: 0,
+    thisMonthExpenses: 0,
+    thisMonthProfit: 0,
+    todayRevenue: 0,
+    todayExpenses: 0,
+    todayProfit: 0
   });
   const [chartData, setChartData] = useState([]);
 
+  // Form State
+  const [desc, setDesc] = useState('');
+  const [amount, setAmount] = useState('');
+  const [category, setCategory] = useState('Autre');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [submitting, setSubmitting] = useState(false);
+
+  const fetchFinances = async () => {
+    try {
+      const [prescriptionsRes, chargesRes] = await Promise.all([
+        api.get('/prescriptions'),
+        api.get('/charges')
+      ]);
+      const presData = prescriptionsRes.data;
+      const chgData = chargesRes.data;
+
+      setPrescriptions(presData);
+      setCharges(chgData);
+
+      // Calculations
+      let totalRevenue = 0;
+      let thisMonthRevenue = 0;
+      let todayRevenue = 0;
+
+      let totalExpenses = 0;
+      let thisMonthExpenses = 0;
+      let todayExpenses = 0;
+
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+      // 7 days chart array
+      const last7Days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (6 - i));
+        d.setHours(0, 0, 0, 0);
+        return {
+          date: d,
+          label: d.toLocaleDateString('fr-FR', { weekday: 'short' }),
+          revenue: 0,
+          expenses: 0,
+          profit: 0
+        };
+      });
+
+      // Sum prescription revenue
+      presData.forEach((p) => {
+        const price = p.price || 0;
+        const pDate = new Date(p.createdAt);
+
+        totalRevenue += price;
+        if (pDate >= startOfMonth) thisMonthRevenue += price;
+        if (pDate >= startOfToday) todayRevenue += price;
+
+        const dayMatch = last7Days.find(d =>
+          pDate.getFullYear() === d.date.getFullYear() &&
+          pDate.getMonth() === d.date.getMonth() &&
+          pDate.getDate() === d.date.getDate()
+        );
+        if (dayMatch) {
+          dayMatch.revenue += price;
+        }
+      });
+
+      // Sum charge expenses
+      chgData.forEach((c) => {
+        const amountVal = c.amount || 0;
+        const cDate = new Date(c.date);
+
+        totalExpenses += amountVal;
+        if (cDate >= startOfMonth) thisMonthExpenses += amountVal;
+        if (cDate >= startOfToday) todayExpenses += amountVal;
+
+        const dayMatch = last7Days.find(d =>
+          cDate.getFullYear() === d.date.getFullYear() &&
+          cDate.getMonth() === d.date.getMonth() &&
+          cDate.getDate() === d.date.getDate()
+        );
+        if (dayMatch) {
+          dayMatch.expenses += amountVal;
+        }
+      });
+
+      // Calculate profit for chart and stats
+      last7Days.forEach(day => {
+        day.profit = day.revenue - day.expenses;
+      });
+
+      setStats({
+        totalRevenue,
+        totalExpenses,
+        netProfit: totalRevenue - totalExpenses,
+        thisMonthRevenue,
+        thisMonthExpenses,
+        thisMonthProfit: thisMonthRevenue - thisMonthExpenses,
+        todayRevenue,
+        todayExpenses,
+        todayProfit: todayRevenue - todayExpenses
+      });
+
+      setChartData(last7Days);
+    } catch (error) {
+      console.error('Error fetching finance data', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchFinances = async () => {
-      try {
-        const { data } = await api.get('/prescriptions');
-        setPrescriptions(data);
-
-        // Calculate Stats
-        let total = 0;
-        let month = 0;
-        let todayRev = 0;
-
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-        // For Chart (last 7 days)
-        const last7Days = Array.from({length: 7}, (_, i) => {
-          const d = new Date();
-          d.setDate(d.getDate() - (6 - i));
-          d.setHours(0,0,0,0);
-          return { date: d, label: d.toLocaleDateString('en-US', { weekday: 'short' }), revenue: 0 };
-        });
-
-        data.forEach((p) => {
-          const price = p.price || 0;
-          const pDate = new Date(p.createdAt);
-          
-          total += price;
-          if (pDate >= startOfMonth) month += price;
-          if (pDate >= startOfToday) todayRev += price;
-
-          // Chart data grouping
-          const dayMatch = last7Days.find(d => 
-            pDate.getFullYear() === d.date.getFullYear() &&
-            pDate.getMonth() === d.date.getMonth() &&
-            pDate.getDate() === d.date.getDate()
-          );
-          if (dayMatch) {
-            dayMatch.revenue += price;
-          }
-        });
-
-        setStats({ totalRevenue: total, thisMonth: month, today: todayRev });
-        setChartData(last7Days);
-
-      } catch (error) {
-        console.error('Error fetching finance data', error);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchFinances();
   }, []);
 
+  const handleAddCharge = async (e) => {
+    e.preventDefault();
+    if (!desc || !amount) return;
+
+    try {
+      setSubmitting(true);
+      await api.post('/charges', {
+        description: desc,
+        amount: parseFloat(amount),
+        category,
+        date: new Date(date),
+      });
+      // Clear form
+      setDesc('');
+      setAmount('');
+      setCategory('Autre');
+      setDate(new Date().toISOString().split('T')[0]);
+      // Refetch
+      await fetchFinances();
+    } catch (error) {
+      console.error('Error adding charge', error);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteCharge = async (id) => {
+    if (!window.confirm('Êtes-vous sûr de vouloir supprimer cette charge ?')) return;
+
+    try {
+      await api.delete(`/charges/${id}`);
+      await fetchFinances();
+    } catch (error) {
+      console.error('Error deleting charge', error);
+    }
+  };
+
+  const getCategoryBadgeClass = (cat) => {
+    switch (cat) {
+      case 'Loyer':
+        return 'bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-950/20 dark:text-blue-400 dark:border-blue-900/30';
+      case 'Électricité/Eau':
+        return 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30';
+      case 'Équipement':
+        return 'bg-purple-50 text-purple-700 border-purple-100 dark:bg-purple-950/20 dark:text-purple-400 dark:border-purple-900/30';
+      case 'Salaires':
+        return 'bg-teal-50 text-teal-700 border-teal-100 dark:bg-teal-950/20 dark:text-teal-400 dark:border-teal-900/30';
+      case 'Fournitures':
+        return 'bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-950/20 dark:text-indigo-400 dark:border-indigo-900/30';
+      default:
+        return 'bg-slate-50 text-slate-700 border-slate-100 dark:bg-slate-950/20 dark:text-slate-400 dark:border-slate-900/30';
+    }
+  };
+
   const statCards = [
-    { 
-      title: 'Revenus Totaux', 
-      value: stats.totalRevenue, 
+    {
+      title: 'Revenus Totaux',
+      value: stats.totalRevenue,
+      subtext: `Ce mois: +${stats.thisMonthRevenue.toLocaleString()} DA`,
       description: 'Revenus historiques',
-      icon: Coins, 
-      color: 'text-indigo-500', 
-      bg: 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-100 dark:border-indigo-900/30' 
+      icon: Coins,
+      color: 'text-teal-500',
+      bg: 'bg-teal-50 dark:bg-teal-950/30 border-teal-100 dark:border-teal-900/30'
     },
-    { 
-      title: 'Ce Mois-ci', 
-      value: stats.thisMonth, 
-      description: 'Cycle actuel',
-      icon: TrendingUp, 
-      color: 'text-emerald-500', 
-      bg: 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-100 dark:border-emerald-900/30' 
+    {
+      title: 'Charges Totales',
+      value: stats.totalExpenses,
+      subtext: `Ce mois: -${stats.thisMonthExpenses.toLocaleString()} DA`,
+      description: 'Dépenses et charges opérationnelles',
+      icon: TrendingDown,
+      color: 'text-rose-500',
+      bg: 'bg-rose-50 dark:bg-rose-950/30 border-rose-100 dark:border-rose-900/30'
     },
-    { 
-      title: 'Revenus d\'Aujourd\'hui', 
-      value: stats.today, 
-      description: 'Frais de consultation d\'aujourd\'hui',
-      icon: Calendar, 
-      color: 'text-amber-500', 
-      bg: 'bg-amber-50 dark:bg-amber-950/30 border-amber-100 dark:border-amber-900/30' 
+    {
+      title: 'Bénéfice Net',
+      value: stats.netProfit,
+      subtext: `Ce mois: ${stats.thisMonthProfit >= 0 ? '+' : ''}${stats.thisMonthProfit.toLocaleString()} DA`,
+      description: 'Bénéfice net après déduction',
+      icon: Wallet,
+      color: stats.netProfit >= 0 ? 'text-indigo-500' : 'text-rose-500',
+      bg: stats.netProfit >= 0 
+        ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-100 dark:border-indigo-900/30' 
+        : 'bg-rose-50 dark:bg-rose-950/30 border-rose-100 dark:border-rose-900/30'
     },
   ];
 
@@ -126,7 +254,8 @@ export default function Finance() {
               <div className="text-2xl font-extrabold text-slate-900 tracking-tight">
                 {stat.value.toLocaleString()} <span className="text-sm font-semibold text-slate-400">DA</span>
               </div>
-              <p className="text-[10px] text-slate-500 mt-1 font-medium">{stat.description}</p>
+              <p className="text-xs font-bold text-slate-600 mt-1">{stat.subtext}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5 font-medium">{stat.description}</p>
             </CardContent>
           </Card>
         ))}
@@ -138,11 +267,11 @@ export default function Finance() {
           <CardHeader className="flex flex-row items-center justify-between border-b border-slate-100/80 pb-4">
             <div>
               <CardTitle className="text-md font-bold text-slate-800 flex items-center gap-2">
-                <Activity className="h-4 w-4 text-emerald-500" /> Aperçu des Revenus (7 Derniers Jours)
+                <Activity className="h-4 w-4 text-indigo-500" /> Aperçu Financier (7 Derniers Jours)
               </CardTitle>
-              <p className="text-xs text-slate-400 font-medium">Métrique de performance de facturation quotidienne</p>
+              <p className="text-xs text-slate-400 font-medium">Flux quotidiens des revenus, dépenses et bénéfice net</p>
             </div>
-            <span className="px-2 py-0.5 text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-full tracking-wider uppercase">Cycle de 7 Jours</span>
+            <span className="px-2 py-0.5 text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full tracking-wider uppercase">Cycle de 7 Jours</span>
           </CardHeader>
           <CardContent className="pt-6">
             <div className="h-72 w-full mt-2">
@@ -150,17 +279,25 @@ export default function Finance() {
                 <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.25}/>
-                      <stop offset="95%" stopColor="#14b8a6" stopOpacity={0.01}/>
+                      <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#14b8a6" stopOpacity={0.01} />
+                    </linearGradient>
+                    <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.01} />
+                    </linearGradient>
+                    <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.01} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 600}} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 600}} tickFormatter={(value) => `${value} DA`} />
-                  <Tooltip 
-                    contentStyle={{ 
-                      borderRadius: '12px', 
-                      border: '1px solid rgba(255,255,255,0.4)', 
+                  <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }} tickFormatter={(value) => `${value} DA`} />
+                  <Tooltip
+                    contentStyle={{
+                      borderRadius: '12px',
+                      border: '1px solid rgba(255,255,255,0.4)',
                       background: 'rgba(255,255,255,0.85)',
                       backdropFilter: 'blur(8px)',
                       boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.05)',
@@ -168,9 +305,10 @@ export default function Finance() {
                       fontSize: '11px',
                       fontWeight: 600
                     }}
-                    formatter={(value) => [`${value.toLocaleString()} DA`, 'Revenue']}
                   />
-                  <Area type="monotone" dataKey="revenue" stroke="#14b8a6" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
+                  <Area type="monotone" name="Revenus" dataKey="revenue" stroke="#14b8a6" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
+                  <Area type="monotone" name="Charges" dataKey="expenses" stroke="#f43f5e" strokeWidth={3} fillOpacity={1} fill="url(#colorExpenses)" />
+                  <Area type="monotone" name="Bénéfice Net" dataKey="profit" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorProfit)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -191,8 +329,8 @@ export default function Finance() {
               <Table>
                 <TableBody>
                   {prescriptions.slice(0, 10).map((p, index) => (
-                    <TableRow 
-                      key={p._id} 
+                    <TableRow
+                      key={p._id}
                       className="hover:bg-slate-50 border-b border-slate-100 last:border-0 transition-colors animate-in fade-in-25 duration-300"
                       style={{ animationDelay: `${index * 30}ms` }}
                     >
@@ -220,6 +358,149 @@ export default function Finance() {
                         <div className="flex flex-col items-center gap-1 justify-center">
                           <Receipt className="h-6 w-6 text-slate-200 animate-pulse" />
                           <p className="text-xs font-semibold text-slate-500">Aucune transaction enregistrée</p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charge Management Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Add Charge Form */}
+        <Card className="border border-slate-200/60 bg-white/80 backdrop-blur-md shadow-sm">
+          <CardHeader className="border-b border-slate-100/80 pb-4">
+            <CardTitle className="text-md font-bold text-slate-800 flex items-center gap-2">
+              <Plus className="h-4 w-4 text-indigo-500" />
+              Enregistrer une Charge
+            </CardTitle>
+            <p className="text-xs text-slate-400 font-medium">Ajouter une nouvelle dépense opérationnelle</p>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <form onSubmit={handleAddCharge} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="desc">Description</Label>
+                <Input
+                  id="desc"
+                  type="text"
+                  placeholder="Ex: Loyer, Electricité..."
+                  value={desc}
+                  onChange={(e) => setDesc(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="amount">Montant (DA)</Label>
+                  <Input
+                    id="amount"
+                    type="number"
+                    placeholder="Montant"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    required
+                    min="0"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="category">Catégorie</Label>
+                  <select
+                    id="category"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-800 dark:bg-slate-950"
+                  >
+                    <option value="Loyer">Loyer</option>
+                    <option value="Électricité/Eau">Électricité/Eau</option>
+                    <option value="Équipement">Équipement</option>
+                    <option value="Salaires">Salaires</option>
+                    <option value="Fournitures">Fournitures</option>
+                    <option value="Autre">Autre</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="date">Date</Label>
+                <Input
+                  id="date"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  required
+                />
+              </div>
+
+              <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer" disabled={submitting}>
+                {submitting ? 'Ajout en cours...' : 'Ajouter la Charge'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Charges Table */}
+        <Card className="border border-slate-200/60 bg-white/80 backdrop-blur-md shadow-sm lg:col-span-2">
+          <CardHeader className="border-b border-slate-100/80 pb-4">
+            <CardTitle className="text-md font-bold text-slate-800 flex items-center gap-2">
+              <Receipt className="h-4 w-4 text-rose-500" />
+              Registre des Charges
+            </CardTitle>
+            <p className="text-xs text-slate-400 font-medium">Historique complet des charges et dépenses</p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="max-h-[350px] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
+                    <TableHead className="font-semibold text-slate-600 text-xs px-6 py-3">Date</TableHead>
+                    <TableHead className="font-semibold text-slate-600 text-xs px-6 py-3">Description</TableHead>
+                    <TableHead className="font-semibold text-slate-600 text-xs px-6 py-3">Catégorie</TableHead>
+                    <TableHead className="font-semibold text-slate-600 text-xs px-6 py-3 text-right">Montant</TableHead>
+                    <TableHead className="font-semibold text-slate-600 text-xs px-6 py-3 text-center">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {charges.map((c, index) => (
+                    <TableRow
+                      key={c._id}
+                      className="hover:bg-slate-50 border-b border-slate-100 last:border-0 transition-colors animate-in fade-in-25 duration-300"
+                      style={{ animationDelay: `${index * 30}ms` }}
+                    >
+                      <TableCell className="px-6 py-3 text-xs text-slate-500 font-medium">
+                        {new Date(c.date).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </TableCell>
+                      <TableCell className="px-6 py-3 text-xs font-bold text-slate-800">
+                        {c.description}
+                      </TableCell>
+                      <TableCell className="px-6 py-3 text-xs">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${getCategoryBadgeClass(c.category)}`}>
+                          {c.category}
+                        </span>
+                      </TableCell>
+                      <TableCell className="px-6 py-3 text-xs font-bold text-right text-rose-600">
+                        -{c.amount.toLocaleString()} DA
+                      </TableCell>
+                      <TableCell className="px-6 py-3 text-center">
+                        <button
+                          onClick={() => handleDeleteCharge(c._id)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {charges.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center py-12 text-slate-400">
+                        <div className="flex flex-col items-center gap-1 justify-center">
+                          <Receipt className="h-6 w-6 text-slate-200" />
+                          <p className="text-xs font-semibold text-slate-500">Aucune charge enregistrée</p>
                         </div>
                       </TableCell>
                     </TableRow>
